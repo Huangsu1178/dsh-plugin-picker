@@ -86,7 +86,7 @@ export interface CreatePackageResult {
   /** Absolute path of the created package directory. */
   readonly path: string
   /** Skill names actually written into the package. */
-  readonly skills: readonly string[]
+  readonly skills: string[]
 }
 
 /** Host routes. */

@@ -488,7 +488,7 @@ export function apply(ctx: Context, config?: Config): void {
           'Skills can be packed from the existing skill library (~/.agents/skills) via sourceSkill, or created inline via content (full SKILL.md body). ' +
           'Triggers: create plugin package / skill plugin pack, package skills into a plugin, 创建插件包 / 打包技能成插件.',
         parameters: {
-          name: { type: 'string', description: 'Plugin package name, kebab-case (required).' },
+          name: { type: 'string', description: 'Plugin package name, kebab-case (required).', required: true },
           displayName: { type: 'string', description: 'Display name shown in the @ menu (defaults to name).' },
           description: { type: 'string', description: 'Short description of the plugin package.' },
           version: { type: 'string', description: 'Version, dotted (default 0.1.0).' },
@@ -497,28 +497,30 @@ export function apply(ctx: Context, config?: Config): void {
             description: 'Skills to include in the package.',
             items: {
               type: 'object',
+              additionalProperties: false,
               properties: {
-                name: { type: 'string', description: 'Target skill name inside the package (kebab).' },
+                name: { type: 'string', description: 'Target skill name inside the package (kebab).', required: true },
                 sourceSkill: { type: 'string', description: 'Pack this existing skill from ~/.agents/skills (defaults to name).' },
                 content: { type: 'string', description: 'Or the full SKILL.md body for a brand-new skill.' },
               },
-              required: ['name'],
             },
           },
         },
         output: {
-          type: 'object',
-          properties: {
-            pluginName: { type: 'string' },
-            version: { type: 'string' },
-            path: { type: 'string' },
-            skills: { type: 'array', items: { type: 'string' } },
+          schema: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              pluginName: { type: 'string', required: true },
+              version: { type: 'string', required: true },
+              path: { type: 'string', required: true },
+              skills: { type: 'array', items: { type: 'string' }, required: true },
+            },
           },
-          required: ['pluginName', 'version', 'path', 'skills'],
+          render: (_args, value: CreatePackageResult) => [
+            { type: 'text', text: `created plugin package ${value.pluginName}@${value.version} at ${value.path}\nskills: ${value.skills.join(', ')}` },
+          ] as ContentBlock[],
         },
-        render: (_args, value) => [
-          { type: 'text', text: `created plugin package ${value.pluginName}@${value.version} at ${value.path}\nskills: ${value.skills.join(', ')}` },
-        ] as ContentBlock[],
         async execute(args) {
           return await createPackage(pluginsDir, args)
         },
