@@ -133,6 +133,19 @@ export function apply(ctx: ClientContext): void {
       const names = await fetchCatalogNames(session.sessionId, request.signal)
       const query = request.query.trim().toLowerCase()
       const out: PluginCandidate[] = []
+
+      // Fixed "create a plugin package" entry, always first.
+      const createLabel = '＋ 新建插件包 (create)'
+      if (query === '' || createLabel.toLowerCase().includes(query)) {
+        out.push({
+          name: createLabel,
+          description: '把技能打包成一个新的 Codex 插件包（工具：dsh_plugin_package_create）',
+          __pluginName: '__create__',
+          __displayName: '新建插件包',
+          __skills: [],
+        })
+      }
+
       for (const plugin of plugins) {
         const haystack = `${plugin.displayName} ${plugin.pluginName} ${plugin.shortDescription} ${plugin.skills
           .map((skill) => skill.name)
@@ -156,6 +169,14 @@ export function apply(ctx: ClientContext): void {
     },
     onPick(pick: InputTriggerPick): PickOutcome {
       const candidate = pick.candidate as PluginCandidate
+      if (candidate.__pluginName === '__create__') {
+        return {
+          text:
+            '请用 dsh_plugin_package_create 工具创建一个新的插件包：' +
+            '名称（kebab-case）：____；显示名：____；描述：____；' +
+            '包含技能：____（现有技能名，或以 SKILL.md 内容新建） ',
+        }
+      }
       const displayName = candidate.__displayName ?? candidate.name
       const gestures = (candidate.__skills ?? []).map((skillName) => `/${skillName}`).join(' ')
       return { text: `@${displayName} ${gestures} `.trimEnd() + ' ' }

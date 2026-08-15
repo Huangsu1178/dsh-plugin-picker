@@ -55,8 +55,43 @@ export interface PluginPickerConfigPatch {
   readonly nicknames?: Readonly<Record<string, string>>
 }
 
+/** One skill to include when creating a plugin package. */
+export interface CreatePackageSkillInput {
+  /** Target skill name inside the package (kebab). */
+  readonly name: string
+  /** Pack an existing skill by copying its directory from the skill library. */
+  readonly sourceSkill?: string
+  /** Or inline SKILL.md body for a brand-new skill. */
+  readonly content?: string
+}
+
+/** Body accepted by POST /packages (create a plugin package). */
+export interface CreatePackageRequest {
+  /** Plugin package name (kebab). */
+  readonly name: string
+  /** Display name (defaults to `name`). */
+  readonly displayName?: string
+  /** Short description. */
+  readonly description?: string
+  /** Version (defaults to 0.1.0). */
+  readonly version?: string
+  /** Skills to include (pack existing or inline content). */
+  readonly skills?: readonly CreatePackageSkillInput[]
+}
+
+/** Result of a successful package creation. */
+export interface CreatePackageResult {
+  readonly pluginName: string
+  readonly version: string
+  /** Absolute path of the created package directory. */
+  readonly path: string
+  /** Skill names actually written into the package. */
+  readonly skills: readonly string[]
+}
+
 /** Host routes. */
 export const PLUGIN_PICKER_API = '/api/dsh-plugin-picker'
 export const PLUGIN_PICKER_PLUGINS = `${PLUGIN_PICKER_API}/plugins`
 export const PLUGIN_PICKER_CONFIG = `${PLUGIN_PICKER_API}/config`
 export const PLUGIN_PICKER_SYNC = `${PLUGIN_PICKER_API}/sync`
+export const PLUGIN_PICKER_PACKAGES = `${PLUGIN_PICKER_API}/packages`

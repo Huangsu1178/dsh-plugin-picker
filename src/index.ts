@@ -11,27 +11,36 @@
  * listed or synced).
  *
  * Routes (all loopback-fenced):
- *   GET  /api/dsh-plugin-picker/plugins   enabled packages (nickname applied)
- *   GET  /api/dsh-plugin-picker/config    full package list + enable/nickname config
- *   PUT  /api/dsh-plugin-picker/config    merge + persist enable/nickname config
- *   POST /api/dsh-plugin-picker/sync      re-run the Codex → DSH sync
+ *   GET  /api/dsh-plugin-picker/plugins     enabled packages (nickname applied)
+ *   GET  /api/dsh-plugin-picker/config      full package list + enable/nickname config
+ *   PUT  /api/dsh-plugin-picker/config      merge + persist enable/nickname config
+ *   POST /api/dsh-plugin-picker/sync        re-run the Codex → DSH sync
+ *   POST /api/dsh-plugin-picker/packages    create a plugin package (tool-backed)
+ *
+ * A `dsh_plugin_package_create` agent tool wraps the same creation path, so a
+ * model can assemble skills into a Codex-compatible plugin package on demand.
  *
  * Config lives in `~/.dsh/plugin-picker.json` (enabled / nicknames maps), so
  * the user can edit it by hand or through the settings card.
  */
 
-import { cp, mkdir, readdir, readFile } from 'node:fs/promises'
+import { cp, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { defineTool } from '@deepseek-ai/dsh-tools'
 import z from 'schemastery'
 import {
   PLUGIN_PICKER_CONFIG,
+  PLUGIN_PICKER_PACKAGES,
   PLUGIN_PICKER_PLUGINS,
   PLUGIN_PICKER_SYNC,
+  type CreatePackageRequest,
+  type CreatePackageResult,
   type PluginPackageConfigRow,
   type PluginPackageSummary,
   type PluginPickerConfig,
@@ -43,8 +52,8 @@ import {
 /** Stable cordis plugin name. */
 export const name = 'plugin-picker'
 
-/** Services required before the route can mount. */
-export const inject = ['webServer']
+/** Services required before the routes and tool can mount. */
+export const inject = ['webServer', 'tools']
 
 /** Plugin config, validated by the same-named schemastery schema. */
 export interface Config {
@@ -361,6 +370,84 @@ async function scanPlugins(root: string): Promise<PluginPackageSummary[]> {
   return summaries.sort((a, b) => a.displayName.localeCompare(b.displayName, 'zh'))
 }
 
+// ---------------------------------------------------------------------------
+// Create: assemble skills into a Codex-compatible plugin package.
+// ---------------------------------------------------------------------------
+
+/** Kebab-case name grammar (same as skill names). */
+const KEBAB_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/
+
+/** Skill library the create path packs from. */
+const SKILL_LIBRARY = join(homedir(), '.agents', 'skills')
+
+/**
+ * Create a plugin package directory under the DSH cache:
+ * `<pluginsDir>/<name>/<version>/` with `.codex-plugin/plugin.json` and
+ * `skills/<skill>/`. Skills are either packed from the skill library
+ * (`sourceSkill`) or written inline (`content`).
+ * @param pluginsDir - DSH plugin cache root.
+ * @param request - creation input.
+ * @returns the created package summary.
+ */
+async function createPackage(pluginsDir: string, request: CreatePackageRequest): Promise<CreatePackageResult> {
+  const pluginName = request.name
+  if (typeof pluginName !== 'string' || !KEBAB_NAME.test(pluginName)) {
+    throw new Error(`invalid plugin name "${pluginName}" (kebab-case required)`)
+  }
+  const version = typeof request.version === 'string' && request.version.length > 0 ? request.version : '0.1.0'
+  const dest = join(pluginsDir, pluginName, version)
+  if (existsSync(dest)) throw new Error(`plugin package already exists: ${pluginName}@${version}`)
+
+  const skills = Array.isArray(request.skills) ? request.skills : []
+  for (const skill of skills) {
+    if (typeof skill?.name !== 'string' || !KEBAB_NAME.test(skill.name)) {
+      throw new Error(`invalid skill name "${skill?.name}" (kebab-case required)`)
+    }
+    if (typeof skill.content === 'string' && skill.content.length > 0) continue
+    const sourceName = typeof skill.sourceSkill === 'string' && skill.sourceSkill.length > 0 ? skill.sourceSkill : skill.name
+    if (!existsSync(join(SKILL_LIBRARY, sourceName, 'SKILL.md'))) {
+      throw new Error(`source skill not found: ${sourceName}`)
+    }
+  }
+
+  await mkdir(join(dest, '.codex-plugin'), { recursive: true })
+  await mkdir(join(dest, 'skills'), { recursive: true })
+  const displayName = typeof request.displayName === 'string' && request.displayName.length > 0
+    ? request.displayName
+    : pluginName
+  const description = typeof request.description === 'string' ? request.description : ''
+  await writeFile(
+    join(dest, '.codex-plugin', 'plugin.json'),
+    JSON.stringify(
+      {
+        name: pluginName,
+        version,
+        description,
+        skills: './skills/',
+        interface: { displayName, shortDescription: description },
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  )
+
+  const written: string[] = []
+  for (const skill of skills) {
+    const skillName = skill.name
+    const skillDir = join(dest, 'skills', skillName)
+    if (typeof skill.content === 'string' && skill.content.length > 0) {
+      await mkdir(skillDir, { recursive: true })
+      await writeFile(join(skillDir, 'SKILL.md'), skill.content, 'utf8')
+    } else {
+      const sourceName = typeof skill.sourceSkill === 'string' && skill.sourceSkill.length > 0 ? skill.sourceSkill : skillName
+      await cp(join(SKILL_LIBRARY, sourceName), skillDir, { recursive: true })
+    }
+    written.push(skillName)
+  }
+  return { pluginName, version, path: dest, skills: written }
+}
+
 /**
  * Mount the sync + scan + config routes.
  * @param ctx - host plugin context carrying webServer.
@@ -391,8 +478,72 @@ export function apply(ctx: Context, config?: Config): void {
   // Startup: kick the sync so the DSH cache is current before first use.
   void ensureSync()
 
+  // Agent tool: create a plugin package (same path as POST /packages).
+  ctx.effect(() => {
+    const disposer = ctx.tools.register(
+      defineTool({
+        name: 'dsh_plugin_package_create',
+        description:
+          'Create a new Codex-compatible plugin package in the DSH plugin cache (~/.dsh/plugins/cache), so it appears in the @ menu immediately. ' +
+          'Skills can be packed from the existing skill library (~/.agents/skills) via sourceSkill, or created inline via content (full SKILL.md body). ' +
+          'Triggers: create plugin package / skill plugin pack, package skills into a plugin, 创建插件包 / 打包技能成插件.',
+        parameters: {
+          name: { type: 'string', description: 'Plugin package name, kebab-case (required).' },
+          displayName: { type: 'string', description: 'Display name shown in the @ menu (defaults to name).' },
+          description: { type: 'string', description: 'Short description of the plugin package.' },
+          version: { type: 'string', description: 'Version, dotted (default 0.1.0).' },
+          skills: {
+            type: 'array',
+            description: 'Skills to include in the package.',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: 'Target skill name inside the package (kebab).' },
+                sourceSkill: { type: 'string', description: 'Pack this existing skill from ~/.agents/skills (defaults to name).' },
+                content: { type: 'string', description: 'Or the full SKILL.md body for a brand-new skill.' },
+              },
+              required: ['name'],
+            },
+          },
+        },
+        output: {
+          type: 'object',
+          properties: {
+            pluginName: { type: 'string' },
+            version: { type: 'string' },
+            path: { type: 'string' },
+            skills: { type: 'array', items: { type: 'string' } },
+          },
+          required: ['pluginName', 'version', 'path', 'skills'],
+        },
+        render: (_args, value) => [
+          { type: 'text', text: `created plugin package ${value.pluginName}@${value.version} at ${value.path}\nskills: ${value.skills.join(', ')}` },
+        ] as ContentBlock[],
+        async execute(args) {
+          return await createPackage(pluginsDir, args)
+        },
+      }),
+    )
+    return disposer
+  }, 'plugin-picker: create tool')
+
   ctx.effect(() => {
     const disposers = [
+      ctx.webServer.register({
+        kind: 'exact',
+        path: PLUGIN_PICKER_PACKAGES,
+        handler: async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
+          if (!isLoopbackRequest(request)) return json(response, 403, { error: 'loopback only' })
+          if (request.method !== 'POST') return json(response, 405, { error: 'method not allowed' })
+          try {
+            const body = (await readJsonBody(request)) as CreatePackageRequest
+            const result = await createPackage(pluginsDir, body)
+            json(response, 200, result)
+          } catch (error) {
+            json(response, 400, { error: String(error) })
+          }
+        },
+      }),
       ctx.webServer.register({
         kind: 'exact',
         path: PLUGIN_PICKER_PLUGINS,
