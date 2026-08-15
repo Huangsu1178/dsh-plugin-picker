@@ -26,6 +26,21 @@ const rowStyle: React.CSSProperties = {
   padding: '6px 0',
 }
 
+/** Card container: bordered drawer frame matching the official settings cards. */
+const cardStyle: React.CSSProperties = {
+  border: '1px solid var(--dsw-alias-border-l2, #d0d7de)',
+  background: 'var(--dsw-alias-bg-layer-3, rgba(0,0,0,0.03))',
+  borderRadius: 12,
+  listStyle: 'none',
+  overflow: 'hidden',
+}
+
+/** Expanded-state background (drawer pulled open). */
+const cardOpenStyle: React.CSSProperties = {
+  background: 'var(--dsw-alias-bg-layer-2, rgba(0,0,0,0.06))',
+  borderColor: 'var(--dsw-alias-label-dimmed, #9aa4b2)',
+}
+
 const inputStyle: React.CSSProperties = {
   flex: 1,
   minWidth: 0,
@@ -38,18 +53,21 @@ const inputStyle: React.CSSProperties = {
 }
 
 const headerStyle: React.CSSProperties = {
+  appearance: 'none',
   display: 'flex',
   alignItems: 'center',
-  gap: 8,
+  gap: 12,
   width: '100%',
-  background: 'none',
+  background: 'transparent',
   border: 'none',
-  padding: '4px 0',
+  padding: '14px 16px',
   cursor: 'pointer',
   color: 'inherit',
-  fontSize: 14,
+  fontSize: 15,
   fontWeight: 600,
+  lineHeight: 1.4,
   textAlign: 'left',
+  borderRadius: 12,
 }
 
 const chevronStyle: React.CSSProperties = {
@@ -178,7 +196,7 @@ export function PluginPickerSettingsCard(props: PluginPickerSettingsCardProps) {
     JSON.stringify(nicknames) !== JSON.stringify(data.nicknames)
 
   return (
-    <li style={{ padding: '8px 0' }}>
+    <li style={{ ...cardStyle, ...(open ? cardOpenStyle : {}) }}>
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -189,11 +207,11 @@ export function PluginPickerSettingsCard(props: PluginPickerSettingsCardProps) {
         <span style={{ ...chevronStyle, transform: open ? 'rotate(90deg)' : 'none' }} aria-hidden>
           ▶
         </span>
-        <span>{t('settings.title')}</span>
+        <span style={{ flex: 1, minWidth: 0 }}>{t('settings.title')}</span>
         {dirty && <span style={{ fontSize: 12, opacity: 0.7, fontWeight: 400 }}>{t('settings.unsaved')}</span>}
       </button>
       {open && (
-        <>
+        <div style={{ padding: '0 16px 14px' }}>
           <div style={{ opacity: 0.75, fontSize: 12, margin: '2px 0 6px' }}>{t('settings.description')}</div>
           {data.plugins.map((plugin) => (
             <div key={plugin.pluginName} style={rowStyle}>
@@ -226,7 +244,7 @@ export function PluginPickerSettingsCard(props: PluginPickerSettingsCardProps) {
             {dirty && <span style={{ fontSize: 12, opacity: 0.7 }}>{t('settings.unsaved')}</span>}
           </div>
           {error !== null && <div style={{ fontSize: 12, color: 'var(--dsw-alias-state-error-primary, #d03050)' }}>{error}</div>}
-        </>
+        </div>
       )}
     </li>
   )
