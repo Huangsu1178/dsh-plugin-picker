@@ -40,12 +40,15 @@ export interface PluginPickerConfig {
   readonly enabled?: Readonly<Record<string, boolean>>
   /** Per-plugin display nickname overriding interface.displayName. */
   readonly nicknames?: Readonly<Record<string, string>>
+  /** Plugin names excluded entirely: never synced, never listed. */
+  readonly excluded?: readonly string[]
 }
 
 /** Config route payload: the persisted config plus the full plugin list. */
 export interface PluginPickerConfigResponse {
   readonly enabled: Readonly<Record<string, boolean>>
   readonly nicknames: Readonly<Record<string, string>>
+  readonly excluded: readonly string[]
   readonly plugins: readonly PluginPackageConfigRow[]
 }
 
@@ -53,6 +56,7 @@ export interface PluginPickerConfigResponse {
 export interface PluginPickerConfigPatch {
   readonly enabled?: Readonly<Record<string, boolean>>
   readonly nicknames?: Readonly<Record<string, string>>
+  readonly excluded?: readonly string[]
 }
 
 /** One skill to include when creating a plugin package. */

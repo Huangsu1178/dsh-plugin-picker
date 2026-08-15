@@ -234,10 +234,15 @@ async function existingVersions(dshRoot: string, pluginName: string): Promise<st
 /**
  * Clone Codex plugin packages missing or older in the DSH cache. Only the
  * latest version of each Codex plugin is mirrored; packages already present
- * at the same or newer version are skipped.
+ * at the same or newer version are skipped, and excluded plugin names are
+ * never cloned (they were removed by the user).
  */
-async function syncFromCodex(dshRoot: string, codexRoot: string): Promise<{ copied: number; skipped: number }> {
-  const packages = await findPluginPackages(codexRoot)
+async function syncFromCodex(
+  dshRoot: string,
+  codexRoot: string,
+  excluded: readonly string[],
+): Promise<{ copied: number; skipped: number }> {
+  const packages = (await findPluginPackages(codexRoot)).filter((pkg) => !excluded.includes(pkg.pluginName))
   let copied = 0
   let skipped = 0
   for (const pkg of packages) {
@@ -274,9 +279,10 @@ class ConfigStore {
       return {
         enabled: typeof parsed.enabled === 'object' && parsed.enabled !== null ? parsed.enabled : {},
         nicknames: typeof parsed.nicknames === 'object' && parsed.nicknames !== null ? parsed.nicknames : {},
+        excluded: Array.isArray(parsed.excluded) ? parsed.excluded : [],
       }
     } catch {
-      return { enabled: {}, nicknames: {} }
+      return { enabled: {}, nicknames: {}, excluded: [] }
     }
   }
 
@@ -284,7 +290,8 @@ class ConfigStore {
   update(patch: PluginPickerConfigPatch): PluginPickerConfig {
     const enabled = { ...(this.value.enabled ?? {}), ...(patch.enabled ?? {}) }
     const nicknames = { ...(this.value.nicknames ?? {}), ...(patch.nicknames ?? {}) }
-    this.value = { enabled, nicknames }
+    const excluded = [...new Set([...(this.value.excluded ?? []), ...(patch.excluded ?? [])])]
+    this.value = { enabled, nicknames, excluded }
     try {
       mkdirSync(dirname(this.file), { recursive: true })
       writeFileSync(this.file, JSON.stringify(this.value, null, 2), 'utf8')
@@ -515,7 +522,9 @@ export function apply(ctx: Context, config?: Config): void {
   let syncPromise: Promise<{ copied: number; skipped: number }> | null = null
   const ensureSync = (): Promise<{ copied: number; skipped: number }> => {
     if (syncPromise === null) {
-      syncPromise = (syncEnabled ? syncFromCodex(pluginsDir, codexDir) : Promise.resolve({ copied: 0, skipped: 0 }))
+      syncPromise = (syncEnabled
+        ? syncFromCodex(pluginsDir, codexDir, store.get().excluded ?? [])
+        : Promise.resolve({ copied: 0, skipped: 0 }))
         .catch((error) => {
           ctx.logger.warn(`plugin-picker: codex sync failed: ${String(error)}`)
           return { copied: 0, skipped: 0 }
@@ -612,6 +621,7 @@ export function apply(ctx: Context, config?: Config): void {
             const configValue = store.get()
             const plugins = await scanPlugins(pluginsDir)
             const visible = plugins
+              .filter((plugin) => !(configValue.excluded ?? []).includes(plugin.pluginName))
               .filter((plugin) => (configValue.enabled?.[plugin.pluginName] ?? true) !== false)
               .map((plugin) => ({
                 ...plugin,
@@ -634,6 +644,7 @@ export function apply(ctx: Context, config?: Config): void {
               const saved = store.update({
                 enabled: typeof patch?.enabled === 'object' && patch.enabled !== null ? patch.enabled : undefined,
                 nicknames: typeof patch?.nicknames === 'object' && patch.nicknames !== null ? patch.nicknames : undefined,
+                excluded: Array.isArray(patch?.excluded) ? patch.excluded : undefined,
               })
               return json(response, 200, configResponse(await scanPlugins(pluginsDir), saved))
             }
@@ -669,16 +680,20 @@ function configResponse(
   plugins: PluginPackageSummary[],
   configValue: PluginPickerConfig,
 ): PluginPickerConfigResponse {
-  const rows: PluginPackageConfigRow[] = plugins.map((plugin) => ({
-    pluginName: plugin.pluginName,
-    displayName: plugin.displayName,
-    version: plugin.version,
-    skills: plugin.skills.map((skill) => skill.name),
-    enabled: (configValue.enabled?.[plugin.pluginName] ?? true) !== false,
-  }))
+  const excluded = configValue.excluded ?? []
+  const rows: PluginPackageConfigRow[] = plugins
+    .filter((plugin) => !excluded.includes(plugin.pluginName))
+    .map((plugin) => ({
+      pluginName: plugin.pluginName,
+      displayName: plugin.displayName,
+      version: plugin.version,
+      skills: plugin.skills.map((skill) => skill.name),
+      enabled: (configValue.enabled?.[plugin.pluginName] ?? true) !== false,
+    }))
   return {
     enabled: configValue.enabled ?? {},
     nicknames: configValue.nicknames ?? {},
+    excluded,
     plugins: rows,
   }
 }
