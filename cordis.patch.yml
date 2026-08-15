@@ -1,0 +1,12 @@
+# dsh-client-ui-plugin-picker bundle patch: inserts the plugin row into the
+# web profile roster. Applied as a profile bundle layer (the `dsh.bundle.patch`
+# manifest field). Activate with
+# `dsh plugin --profile web add link:<path-to-this-package>`.
+#
+# The node half (exports ".") scans/syncs plugin packages and serves the
+# /api/dsh-plugin-picker/* routes; the `dsh.client` declaration makes the
+# browser half (exports "./client") register the '@' trigger source and the
+# plugin-package settings card (official settings.plugin.item slot).
+- insert:
+    - id: ui-plugin-picker
+      name: '@linxin666/dsh-client-ui-plugin-picker'
