@@ -14,6 +14,8 @@ export const zh = {
   'settings.error': '加载失败',
   'settings.saveError': '保存失败',
   'settings.unsaved': '有未保存的更改',
+  'settings.expand': '展开',
+  'settings.collapse': '收起',
 } as const
 
 /** English dictionary, checked complete against the zh key set. */
@@ -27,6 +29,8 @@ export const en = {
   'settings.error': 'Failed to load',
   'settings.saveError': 'Failed to save',
   'settings.unsaved': 'Unsaved changes',
+  'settings.expand': 'Expand',
+  'settings.collapse': 'Collapse',
 } as const
 
 /** Key set (zh is the source of truth). */
