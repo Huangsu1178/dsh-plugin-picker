@@ -16,6 +16,10 @@ export const zh = {
   'settings.unsaved': '有未保存的更改',
   'settings.expand': '展开',
   'settings.collapse': '收起',
+  'settings.sync': '从 Codex 同步',
+  'settings.syncing': '同步中…',
+  'settings.syncDone': '同步完成（复制/跳过）：',
+  'settings.syncError': '同步失败',
 } as const
 
 /** English dictionary, checked complete against the zh key set. */
@@ -31,6 +35,10 @@ export const en = {
   'settings.unsaved': 'Unsaved changes',
   'settings.expand': 'Expand',
   'settings.collapse': 'Collapse',
+  'settings.sync': 'Sync from Codex',
+  'settings.syncing': 'Syncing…',
+  'settings.syncDone': 'Sync done (copied/skipped): ',
+  'settings.syncError': 'Sync failed',
 } as const
 
 /** Key set (zh is the source of truth). */

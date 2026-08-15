@@ -12,7 +12,7 @@
  */
 import { useEffect, useState } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import { PLUGIN_PICKER_CONFIG } from '../protocol.ts'
+import { PLUGIN_PICKER_CONFIG, PLUGIN_PICKER_SYNC } from '../protocol.ts'
 import type { PluginPickerConfigResponse } from '../protocol.ts'
 import type { PluginPickerKey } from './locales.ts'
 
@@ -146,6 +146,8 @@ export function PluginPickerSettingsCard(props: PluginPickerSettingsCardProps) {
   const [enabled, setEnabled] = useState<Record<string, boolean>>({})
   const [nicknames, setNicknames] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -187,6 +189,30 @@ export function PluginPickerSettingsCard(props: PluginPickerSettingsCardProps) {
       setError(`${t('settings.saveError')}: ${String(saveError)}`)
     } finally {
       setSaving(false)
+    }
+  }
+
+  /** User-triggered Codex → DSH sync (the only sync path by default). */
+  const sync = async (): Promise<void> => {
+    setSyncing(true)
+    setError(null)
+    setSyncResult(null)
+    try {
+      const response = await fetch(PLUGIN_PICKER_SYNC, { method: 'POST' })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const body = (await response.json()) as { copied?: number; skipped?: number }
+      setSyncResult(`${t('settings.syncDone')} ${body.copied ?? 0} / ${body.skipped ?? 0}`)
+      const configResponse = await fetch(PLUGIN_PICKER_CONFIG, { headers: { accept: 'application/json' } })
+      if (configResponse.ok) {
+        const fresh = (await configResponse.json()) as PluginPickerConfigResponse
+        setData(fresh)
+        setEnabled({ ...fresh.enabled })
+        setNicknames({ ...fresh.nicknames })
+      }
+    } catch (syncError) {
+      setError(`${t('settings.syncError')}: ${String(syncError)}`)
+    } finally {
+      setSyncing(false)
     }
   }
 
@@ -241,8 +267,17 @@ export function PluginPickerSettingsCard(props: PluginPickerSettingsCardProps) {
             >
               {saving ? t('settings.saving') : t('settings.save')}
             </button>
+            <button
+              type="button"
+              onClick={sync}
+              disabled={syncing}
+              style={{ padding: '4px 14px', borderRadius: 6, cursor: syncing ? 'default' : 'pointer' }}
+            >
+              {syncing ? t('settings.syncing') : t('settings.sync')}
+            </button>
             {dirty && <span style={{ fontSize: 12, opacity: 0.7 }}>{t('settings.unsaved')}</span>}
           </div>
+          {syncResult !== null && <div style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>{syncResult}</div>}
           {error !== null && <div style={{ fontSize: 12, color: 'var(--dsw-alias-state-error-primary, #d03050)' }}>{error}</div>}
         </div>
       )}

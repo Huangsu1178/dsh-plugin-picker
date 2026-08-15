@@ -63,7 +63,11 @@ export interface Config {
   pluginsDir?: string
   /** Codex plugin cache root (sync source). */
   codexPluginsDir?: string
-  /** Whether the startup sync clones the Codex cache into the DSH cache. */
+  /**
+   * Opt-in automatic startup sync from the Codex cache. The default is
+   * user-triggered only: the settings card "Sync from Codex" button /
+   * POST /sync. The DSH cache is always scanned automatically.
+   */
   syncFromCodex?: boolean
   /** Where the enable/nickname config is persisted. */
   configFile?: string
@@ -73,7 +77,7 @@ export const Config: z<Config> = z.object({
   enabled: z.boolean().default(true),
   pluginsDir: z.string().default(join(homedir(), '.dsh', 'plugins', 'cache')),
   codexPluginsDir: z.string().default(join(homedir(), '.codex', 'plugins', 'cache')),
-  syncFromCodex: z.boolean().default(true),
+  syncFromCodex: z.boolean().default(false),
   configFile: z.string().default(join(homedir(), '.dsh', 'plugin-picker.json')),
 })
 
@@ -515,29 +519,17 @@ async function createPackage(pluginsDir: string, request: CreatePackageRequest):
 export function apply(ctx: Context, config?: Config): void {
   const pluginsDir = config?.pluginsDir ?? DEFAULT_PLUGINS_DIR
   const codexDir = config?.codexPluginsDir ?? DEFAULT_CODEX_DIR
-  const syncEnabled = config?.syncFromCodex ?? true
   const store = new ConfigStore(config?.configFile ?? DEFAULT_CONFIG_FILE)
 
-  // One shared sync promise so concurrent route calls wait for the same run.
-  let syncPromise: Promise<{ copied: number; skipped: number }> | null = null
-  const ensureSync = (): Promise<{ copied: number; skipped: number }> => {
-    if (syncPromise === null) {
-      syncPromise = (syncEnabled
-        ? syncFromCodex(pluginsDir, codexDir, store.get().excluded ?? [])
-        : Promise.resolve({ copied: 0, skipped: 0 }))
-        .catch((error) => {
-          ctx.logger.warn(`plugin-picker: codex sync failed: ${String(error)}`)
-          return { copied: 0, skipped: 0 }
-        })
-        .finally(() => {
-          syncPromise = null
-        })
+  /** Run the Codex → DSH sync unconditionally (user-triggered). */
+  const runSync = async (): Promise<{ copied: number; skipped: number }> => {
+    try {
+      return await syncFromCodex(pluginsDir, codexDir, store.get().excluded ?? [])
+    } catch (error) {
+      ctx.logger.warn(`plugin-picker: codex sync failed: ${String(error)}`)
+      return { copied: 0, skipped: 0 }
     }
-    return syncPromise
   }
-
-  // Startup: kick the sync so the DSH cache is current before first use.
-  void ensureSync()
 
   // Agent tool: create a plugin package (same path as POST /packages).
   ctx.effect(() => {
@@ -617,7 +609,6 @@ export function apply(ctx: Context, config?: Config): void {
         handler: async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
           if (!isLoopbackRequest(request)) return json(response, 403, { error: 'loopback only' })
           try {
-            await ensureSync()
             const configValue = store.get()
             const plugins = await scanPlugins(pluginsDir)
             const visible = plugins
@@ -648,7 +639,6 @@ export function apply(ctx: Context, config?: Config): void {
               })
               return json(response, 200, configResponse(await scanPlugins(pluginsDir), saved))
             }
-            await ensureSync()
             json(response, 200, configResponse(await scanPlugins(pluginsDir), store.get()))
           } catch (error) {
             json(response, 400, { error: String(error) })
@@ -661,7 +651,7 @@ export function apply(ctx: Context, config?: Config): void {
         handler: async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
           if (!isLoopbackRequest(request)) return json(response, 403, { error: 'loopback only' })
           try {
-            const result = await ensureSync()
+            const result = await runSync()
             json(response, 200, result)
           } catch (error) {
             json(response, 500, { error: String(error) })
