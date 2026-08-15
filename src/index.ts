@@ -377,14 +377,31 @@ async function scanPlugins(root: string): Promise<PluginPackageSummary[]> {
 /** Kebab-case name grammar (same as skill names). */
 const KEBAB_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
+/** Codex plugin-creator cap: plugin names are at most 64 characters. */
+const MAX_PLUGIN_NAME_LENGTH = 64
+
+/** Codex plugin-creator defaults. */
+const DEFAULT_AUTHOR = 'Local developer'
+const DEFAULT_CATEGORY = 'Productivity'
+
 /** Skill library the create path packs from. */
 const SKILL_LIBRARY = join(homedir(), '.agents', 'skills')
 
+/** Derive a Title-Case display name from a kebab plugin name (Codex plugin-creator style). */
+function displayNameFromPluginName(pluginName: string): string {
+  return pluginName
+    .split(/[-_]+/)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
 /**
- * Create a plugin package directory under the DSH cache:
- * `<pluginsDir>/<name>/<version>/` with `.codex-plugin/plugin.json` and
- * `skills/<skill>/`. Skills are either packed from the skill library
- * (`sourceSkill`) or written inline (`content`).
+ * Create a plugin package directory under the DSH cache, following the Codex
+ * plugin-creator manifest shape:
+ * `<pluginsDir>/<name>/<version>/` with `.codex-plugin/plugin.json`
+ * (author + full interface, `defaultPrompt` included — the Codex validator
+ * requires it) and `skills/<skill>/`. Skills are either packed from the
+ * skill library (`sourceSkill`) or written inline (`content`).
  * @param pluginsDir - DSH plugin cache root.
  * @param request - creation input.
  * @returns the created package summary.
@@ -393,6 +410,9 @@ async function createPackage(pluginsDir: string, request: CreatePackageRequest):
   const pluginName = request.name
   if (typeof pluginName !== 'string' || !KEBAB_NAME.test(pluginName)) {
     throw new Error(`invalid plugin name "${pluginName}" (kebab-case required)`)
+  }
+  if (pluginName.length > MAX_PLUGIN_NAME_LENGTH) {
+    throw new Error(`plugin name too long (${pluginName.length} chars; max ${MAX_PLUGIN_NAME_LENGTH})`)
   }
   const version = typeof request.version === 'string' && request.version.length > 0 ? request.version : '0.1.0'
   const dest = join(pluginsDir, pluginName, version)
@@ -414,8 +434,19 @@ async function createPackage(pluginsDir: string, request: CreatePackageRequest):
   await mkdir(join(dest, 'skills'), { recursive: true })
   const displayName = typeof request.displayName === 'string' && request.displayName.length > 0
     ? request.displayName
-    : pluginName
-  const description = typeof request.description === 'string' ? request.description : ''
+    : displayNameFromPluginName(pluginName)
+  const description = typeof request.description === 'string' && request.description.length > 0
+    ? request.description
+    : `${displayName} plugin`
+  const authorName = typeof request.authorName === 'string' && request.authorName.length > 0
+    ? request.authorName
+    : DEFAULT_AUTHOR
+  const category = typeof request.category === 'string' && request.category.length > 0
+    ? request.category
+    : DEFAULT_CATEGORY
+  const defaultPrompt = typeof request.defaultPrompt === 'string' && request.defaultPrompt.length > 0
+    ? request.defaultPrompt
+    : `Help me use ${displayName}.`
   await writeFile(
     join(dest, '.codex-plugin', 'plugin.json'),
     JSON.stringify(
@@ -423,8 +454,17 @@ async function createPackage(pluginsDir: string, request: CreatePackageRequest):
         name: pluginName,
         version,
         description,
+        author: { name: authorName },
         skills: './skills/',
-        interface: { displayName, shortDescription: description },
+        interface: {
+          displayName,
+          shortDescription: description,
+          longDescription: description,
+          developerName: authorName,
+          category,
+          capabilities: [],
+          defaultPrompt,
+        },
       },
       null,
       2,
@@ -445,6 +485,18 @@ async function createPackage(pluginsDir: string, request: CreatePackageRequest):
     }
     written.push(skillName)
   }
+
+  // Self-check against the Codex plugin-creator validator's core requirements.
+  const manifestPath = join(dest, '.codex-plugin', 'plugin.json')
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>
+  const iface = typeof manifest.interface === 'object' && manifest.interface !== null
+    ? (manifest.interface as Record<string, unknown>)
+    : {}
+  const prompt = iface.defaultPrompt ?? iface.default_prompt
+  if (typeof prompt !== 'string' || prompt.length === 0) {
+    throw new Error('self-check failed: plugin.json interface.defaultPrompt is required')
+  }
+
   return { pluginName, version, path: dest, skills: written }
 }
 
@@ -485,13 +537,17 @@ export function apply(ctx: Context, config?: Config): void {
         name: 'dsh_plugin_package_create',
         description:
           'Create a new Codex-compatible plugin package in the DSH plugin cache (~/.dsh/plugins/cache), so it appears in the @ menu immediately. ' +
+          'The manifest follows the Codex plugin-creator shape: .codex-plugin/plugin.json with author + full interface (displayName, category, defaultPrompt), and skills/ directories. ' +
           'Skills can be packed from the existing skill library (~/.agents/skills) via sourceSkill, or created inline via content (full SKILL.md body). ' +
           'Triggers: create plugin package / skill plugin pack, package skills into a plugin, 创建插件包 / 打包技能成插件.',
         parameters: {
-          name: { type: 'string', description: 'Plugin package name, kebab-case (required).', required: true },
-          displayName: { type: 'string', description: 'Display name shown in the @ menu (defaults to name).' },
-          description: { type: 'string', description: 'Short description of the plugin package.' },
+          name: { type: 'string', description: 'Plugin package name, kebab-case, at most 64 chars (required).', required: true },
+          displayName: { type: 'string', description: 'Display name (defaults to Title-Case derivation of name).' },
+          description: { type: 'string', description: 'Short description (defaults to "<DisplayName> plugin").' },
           version: { type: 'string', description: 'Version, dotted (default 0.1.0).' },
+          authorName: { type: 'string', description: 'Publisher name for author/developerName (default "Local developer").' },
+          category: { type: 'string', description: 'Interface category (default "Productivity").' },
+          defaultPrompt: { type: 'string', description: 'Interface defaultPrompt, required by the Codex validator (default "Help me use <DisplayName>.").' },
           skills: {
             type: 'array',
             description: 'Skills to include in the package.',

@@ -67,14 +67,20 @@ export interface CreatePackageSkillInput {
 
 /** Body accepted by POST /packages (create a plugin package). */
 export interface CreatePackageRequest {
-  /** Plugin package name (kebab). */
+  /** Plugin package name (kebab-case, <= 64 chars). */
   readonly name: string
-  /** Display name (defaults to `name`). */
+  /** Display name (defaults to a Title-Case derivation of `name`). */
   readonly displayName?: string
-  /** Short description. */
+  /** Short description (defaults to "<DisplayName> plugin"). */
   readonly description?: string
   /** Version (defaults to 0.1.0). */
   readonly version?: string
+  /** Publisher name written into `author` / `interface.developerName`. */
+  readonly authorName?: string
+  /** Interface category (defaults to "Productivity"). */
+  readonly category?: string
+  /** Interface `defaultPrompt` (required by the Codex validator). */
+  readonly defaultPrompt?: string
   /** Skills to include (pack existing or inline content). */
   readonly skills?: readonly CreatePackageSkillInput[]
 }
